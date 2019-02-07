@@ -1,4 +1,3 @@
-
 ##### pitch a tent production model #####
 #Emiy Greve# 
 
@@ -19,6 +18,9 @@ from ccm.lib.actr import *
 # items look and act like chunks - but note the syntactic differences
 
 class forest(ccm.Model):
+    clearing=ccm.Model(isa='clearing', location='near', feature1='flat', salience=0.5)
+    clearing2=ccm.Model(isa='clearing', location='near', feature1='slanted', salience=0.5)
+    clearing3=ccm.Model(isa='clearing', location='near', feature1='dead_deer', salience=0.5)   
     footprint=ccm.Model(isa='footprint', colour='green', location='in_bag')    
     tent=ccm.Model(isa='tent', colour='beigh', material='mesh', location='in_bag')
     poles=ccm.Model(isa='tent poles', colour='blue', location='in_bag')
@@ -31,9 +33,6 @@ class forest(ccm.Model):
 # but is controlled from within
 
 class MotorModule(ccm.Model):
-    def find_spot(self):                        #self=Motor, parent=MyAgent, parent of parent=Forest
-        yield 10
-        print "this area seems flat and clear"
 
     def clear(self):
         yield 5
@@ -45,7 +44,7 @@ class MotorModule(ccm.Model):
         print "lay the footprint on the ground"
         self.parent.parent.footprint.location='in_clearing'
 
-    def lay_tent(self):
+    def lay_tent(self):                                          # self=Motor, parent=MyAgent, parent of parent=Forest
         yield 2
         print "lay the tent over the footprint"
         self.parent.parent.tent.location='on_footprint'
@@ -72,25 +71,82 @@ class MotorModule(ccm.Model):
         
 
 # create the agent
+# declarative memory (DM) is build directly in the agent
 
 class MyAgent(ACTR):
     focus=Buffer()
     motor=MotorModule()
 
+    DMbuffer=Buffer()                                           # create a buffer for declarative memory
+    DM=Memory(DMbuffer, latency=0.05,threshold=0)               # create DM and connect it to its buffer
+                                                                # latency controls the relationship between activation and recall
+                                                                # activation must be above threshold - can be set to none
+##    dm_n=DMNoise(DM,noise=0.0,baseNoise=0.0)                  # turn on for DM subsymbolic processing
+##    dm_bl=DMBaseLevel(DM,decay=0.5,limit=None)                # turn on for DM subsymbolic processing
+
+    Vbuffer=Buffer()
+    Vmodule=SOSVision(Vbuffer,delay=0)                          # delay=0 means the results of the visual search are
+                                                                # placed in the visual buffer right after the request
+                                                                # but the request takes 50 msec and the retieval takes 50 msec
+                                                                # so actually it takes 100 msec to get the results at minimum
+
     def init():
+        DM.add('cue:clearing tool:footprint a:test')            # put a chunk into DM
+        DM.add('cue:footprint tool:tent b:test')
+        DM.add('cue:tent tool:fly c:test')
+
         focus.set('find spot')
 
-    def find_spot(focus='find spot'):                           # if focus buffer has this chunk...
-        print ("I have found a good clearing")                  # print
-        focus.set('clear spot')                                 # change the focus buffer
-        motor.find_spot()
+    def find_spot(focus='find spot'):                           
+        Vmodule.request('isa:clearing location:near')        
+        focus.set('check spot')                                 
+        print ("I am looking for a good clearing") 
 
-    def clear_area(focus='clear spot'):                         # the rest of the productions are the same 
-        print ("there is some debris in the clearing")          # but carry out different actions
-        focus.set('lay footprint')
+
+    def check_area(focus='check spot', Vbuffer='isa:clearing location:near feature1:?feature1'):   
+        print ("I have found a clearing")
+        focus.set('check ?feature1')
+
+    def check_yes(focus='check flat'):
+        print ("It is a good flat spot")
+        focus.set('set_up')
+        Vbuffer.clear
+
+    def check_no(focus='check slanted'):
+        focus.set('find spot')
+        Vbuffer.clear
+        print ("It's a good clearing, but slightly slanted")
+        
+    def check_hell_no(focus='check dead_deer'):
+        print ("What the fuck.")
+        focus.set('find spot')
+        Vbuffer.clear
+
+    def not_found(focus='check spot'):
+        focus.set('find spot')
+        Vbuffer.clear
+        print ("I need to find a good spot")
+                                                                
+    def Set_up(focus='set_up'):                                                           
+        print ("There is debris on the spot that needs to be cleared away.")                           
+        print ("What do I need to do next?")
+        DM.request('cue:? tool:?tool a:test')                   # retrieve a chunk from DM into the DM buffer
+        focus.set('first thing')                                # ? means the a slot can match any content
         motor.clear()
 
-    def lay_footprint(focus='lay footprint', debris='location:in_forest'):
+    def remember(focus='first thing', DMbuffer='cue:?clearing tool:?tool', debris='location:in_forest'):
+        print ("oh yea, I need to put down the...")             # match to DMbuffer as well
+        print tool                                              # take off the question mark
+        focus.set('lay footprint')
+
+    def forget(focus='first thing', DMbuffer=None, DM='error:True'):
+                                                                # DMbuffer=none means the buffer is empty
+                                                                # DM='error:True' means the search was unsucessful
+        print "I recall I needed...."
+        print "Fuck, I forgot"
+        focus.set('stop')
+        
+    def lay_footprint(focus='lay footprint'):
         print ("The footprint needs to be layed out flat in the clearing")
         focus.set('lay tent')
         motor.lay_footprint()
@@ -114,14 +170,15 @@ class MyAgent(ACTR):
         print ("The fly should cover the tent")
         focus.set('pegs')
         motor.fly_cover()
-
-    def add_pegs(focus='pegs', fly='location:on_tent'):          # wait for the production to complete before stopping the agent
+                                      
+        
+    def add_pegs(focus='pegs', fly='location:on_tent'):                                                        
         print ("peg down the corners first, make sure the base is taut")
-        focus.set('stop')
+        focus.set('stop')                                       # wait for the production to complete before stopping the agent
         motor.tent_pegs()
 
     def stop_production(focus='stop', pegs='location:in_ground'):
-        self.stop()                                              # stop the agent
+        self.stop()                                             # stop the agent
 
 
 Chia=MyAgent()             # name the agent
@@ -131,4 +188,5 @@ ccm.log_everything(env)    # print out what happens in the environment
 
 env.run()                  # run the environment
 ccm.finished               # stop the environment
+
 
